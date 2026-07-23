@@ -136,6 +136,7 @@ We look forward to hearing from you soon!
 
 Kind Regards,
 Florence D Mandevane
+Accounts Assistant
 AL Accounting Solutions
 admin@alaccountingsolutions.com
 www.alaccountingsolutions.com`;
