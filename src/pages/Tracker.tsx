@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 
@@ -106,38 +107,38 @@ function formatPeriodDate(d?: string): string {
   return isNaN(parsed.getTime()) ? d : format(parsed, 'dd MMM yyyy');
 }
 
-// Two templates selected automatically by MRet status — retainer clients (Template 2)
-// have the deposit request line removed since they're already on a monthly retainer.
+// Two templates selected automatically by MRet status — retainer clients have the
+// deposit request line removed since they're already on a monthly retainer.
+// Plain text with emoji/bullet markers (not HTML tags) so the draft stays a normal,
+// reliably editable Textarea — converted to HTML only at send time.
 function buildEmailBody(r: ClientResult): string {
   const firstName = r.contactName ? r.contactName.split(' ')[0] : r.name.split(' ')[0];
   const periodStart = formatPeriodDate(r.periodStart);
   const periodEnd = formatPeriodDate(r.periodEnd);
 
-  const depositItem = isRetainer(r.mret) ? '' : `
-  <li style="background-color:#ffff00; padding:6px;"><strong>If you are not on a monthly retainer, please pay an advance deposit of <span style="color:red;">£120</span></strong> (Bank name: AL Accounting Solutions Ltd, Sort: 600238, Account: 68132328, Reference: company name)</li>`;
+  const depositLine = isRetainer(r.mret) ? '' : `
+💷 If you are not on a monthly retainer, please pay an advance deposit of £120 (Bank: AL Accounting Solutions Ltd, Sort code: 60-02-38, Account: 68132328, Reference: your company name)`;
 
-  return `<p>Dear ${firstName},</p>
+  return `Dear ${firstName},
 
-<p><strong>Company Name:</strong> ${r.name}<br>
-<strong>Accounting period from:</strong> ${periodStart} to ${periodEnd}</p>
+🏢 Company Name: ${r.name}
+📅 Accounting period: ${periodStart} to ${periodEnd}
 
-<p>Please note that your company's accounts and corporation tax return are due. We require the following documents:</p>
+Your company's accounts and corporation tax return are due. We require the following documents:
 
-<ol>
-  <li>Company bank transactions for the period (please download transactions to Excel/CSV and PDF and send to this email)</li>
-  <li>Sales or income schedule</li>
-  <li>Purchases or expenses schedule for the period</li>
-  <li>Payroll information for the period</li>
-  <li>Any other documents that will help us complete the accounts</li>${depositItem}
-</ol>
+✅ Company bank transactions for the period (please download transactions to Excel/CSV and PDF and send to this email)
+✅ Sales or income schedule
+✅ Purchases or expenses schedule for the period
+✅ Payroll information for the period
+✅ Any other documents that will help us complete the accounts${depositLine}
 
-<p>We look forward to hearing from you soon!</p>
+We look forward to hearing from you soon!
 
-<p>Kind Regards,<br>
-<em>Florence D Mandevane</em><br>
-AL Accounting Solutions<br>
-<a href="mailto:admin@alaccountingsolutions.com">admin@alaccountingsolutions.com</a><br>
-<a href="https://www.alaccountingsolutions.com">www.alaccountingsolutions.com</a></p>`;
+Kind Regards,
+Florence D Mandevane
+AL Accounting Solutions
+admin@alaccountingsolutions.com
+www.alaccountingsolutions.com`;
 }
 
 export default function Tracker() {
@@ -184,10 +185,6 @@ export default function Tracker() {
   const [draftTo, setDraftTo] = useState('');
   const [draftSubject, setDraftSubject] = useState('');
   const [draftBody, setDraftBody] = useState('');
-  // Frozen snapshot used only to seed the contentEditable div's initial HTML at mount.
-  // draftBody keeps changing as the user types; this doesn't, so React never re-applies
-  // dangerouslySetInnerHTML mid-edit (which would reset the cursor to the start).
-  const [draftBodyTemplate, setDraftBodyTemplate] = useState('');
 
   const updateEmailQueue = (updater: (prev: EmailQueueItem[]) => EmailQueueItem[]) => {
     const next = updater(emailQueueRef.current);
@@ -544,20 +541,23 @@ export default function Tracker() {
   };
 
   const openEmailModal = (r: ClientResult) => {
-    const body = buildEmailBody(r);
     setModalRow(r);
     setDraftTo(r.email || '');
     setDraftSubject(`${r.name} Accounts documents required (ACT)`);
-    setDraftBody(body);
-    setDraftBodyTemplate(body);
+    setDraftBody(buildEmailBody(r));
     setEmailModalOpen(true);
   };
 
   const handleSendEmail = () => {
     if (!modalRow) return;
-    // draftBody is already HTML (from buildEmailBody) — just wrap it for consistent font styling.
+    // Convert the plain-text draft to HTML so Make.com preserves line breaks and spacing —
+    // plain text renders as an unstyled wall of text even with the module set to HTML.
     const bodyHtml = '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#333">'
       + draftBody
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\n/g, '<br>')
       + '</div>';
     enqueueEmail({
       id: `${modalRow.number}-${Date.now()}`,
@@ -1162,14 +1162,11 @@ export default function Tracker() {
 
             <div className="space-y-1.5">
               <Label className="text-sm font-medium text-slate-700">Body</Label>
-              <p className="text-xs text-slate-500">Formatted as it will appear in the recipient's inbox — click in to edit.</p>
-              <div
-                key={modalRow ? modalRow.number : 'empty'}
-                contentEditable
-                suppressContentEditableWarning
-                dangerouslySetInnerHTML={{ __html: draftBodyTemplate }}
-                onInput={e => setDraftBody(e.currentTarget.innerHTML)}
-                className="text-sm border border-slate-200 rounded-md p-4 bg-white min-h-[200px] max-h-96 overflow-y-auto focus:outline-none focus:ring-2 focus:ring-teal-500/40"
+              <Textarea
+                value={draftBody}
+                onChange={e => setDraftBody(e.target.value)}
+                rows={18}
+                className="text-sm resize-none leading-relaxed"
               />
             </div>
           </div>
