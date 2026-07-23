@@ -115,6 +115,7 @@ function buildEmailBody(r: ClientResult): string {
   const firstName = r.contactName ? r.contactName.split(' ')[0] : r.name.split(' ')[0];
   const periodStart = formatPeriodDate(r.periodStart);
   const periodEnd = formatPeriodDate(r.periodEnd);
+  const dueDate = formatPeriodDate(r.dueDate || undefined);
 
   const depositLine = isRetainer(r.mret) ? '' : `
 💷 Please pay an advance deposit of £120 (Bank: AL Accounting Solutions Ltd, Sort code: 60-02-38, Account: 68132328, Reference: your company name)`;
@@ -123,6 +124,7 @@ function buildEmailBody(r: ClientResult): string {
 
 🏢 Company Name: ${r.name}
 📅 Accounting period: ${periodStart} to ${periodEnd}
+⏰ Due date: ${dueDate}
 
 Your company's accounts and corporation tax return are due. We require the following documents:
 
@@ -542,9 +544,10 @@ export default function Tracker() {
   };
 
   const openEmailModal = (r: ClientResult) => {
+    const overdueSuffix = r.status === 'overdue' ? ' - Overdue' : '';
     setModalRow(r);
     setDraftTo(r.email || '');
-    setDraftSubject(`${r.name} Accounts documents required (ACT)`);
+    setDraftSubject(`${r.name} Accounts documents required (ACT)${overdueSuffix}`);
     setDraftBody(buildEmailBody(r));
     setEmailModalOpen(true);
   };
