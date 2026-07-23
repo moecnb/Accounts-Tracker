@@ -13,7 +13,6 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Textarea } from '@/components/ui/textarea';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 
@@ -185,6 +184,16 @@ export default function Tracker() {
   const [draftTo, setDraftTo] = useState('');
   const [draftSubject, setDraftSubject] = useState('');
   const [draftBody, setDraftBody] = useState('');
+  const bodyEditableRef = useRef<HTMLDivElement>(null);
+
+  // The contentEditable div owns its own DOM after this — we only push draftBody
+  // into it once per row (on open), not on every keystroke, or the cursor would jump.
+  React.useLayoutEffect(() => {
+    if (emailModalOpen && bodyEditableRef.current) {
+      bodyEditableRef.current.innerHTML = draftBody;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailModalOpen, modalRow]);
 
   const updateEmailQueue = (updater: (prev: EmailQueueItem[]) => EmailQueueItem[]) => {
     const next = updater(emailQueueRef.current);
@@ -1157,11 +1166,13 @@ export default function Tracker() {
 
             <div className="space-y-1.5">
               <Label className="text-sm font-medium text-slate-700">Body</Label>
-              <Textarea
-                value={draftBody}
-                onChange={e => setDraftBody(e.target.value)}
-                rows={18}
-                className="text-sm font-mono resize-none leading-relaxed"
+              <p className="text-xs text-slate-500">Formatted as it will appear in the recipient's inbox — click in to edit.</p>
+              <div
+                ref={bodyEditableRef}
+                contentEditable
+                suppressContentEditableWarning
+                onInput={e => setDraftBody(e.currentTarget.innerHTML)}
+                className="text-sm border border-slate-200 rounded-md p-4 bg-white max-h-96 overflow-y-auto focus:outline-none focus:ring-2 focus:ring-teal-500/40"
               />
             </div>
           </div>
