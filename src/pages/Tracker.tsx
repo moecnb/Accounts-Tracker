@@ -20,8 +20,7 @@ import { toast } from 'sonner';
 // --- Configuration -----------------------------------------------------
 const HARDCODED_KEY = 'ed2030c6-2c5e-4a4c-90a7-597656156886';
 const API_BASE = 'https://api.company-information.service.gov.uk';
-// TODO: paste the Make.com webhook URL here once the "06 - Accounts Tracker - Send Email" scenario is created.
-const EMAIL_WEBHOOK_URL = '';
+const EMAIL_WEBHOOK_URL = 'https://hook.eu2.make.com/lzvt75ds685qmito8cx5ilrvywndj2dr';
 const TEST_EMAIL = 'admin@alaccountingsolutions.com';
 
 // Accounts take longer to prepare than confirmation statements, so this tracker
@@ -31,6 +30,13 @@ const AMBER_THRESHOLD_DAYS = 90;
 
 function padNum(n: string | number): string {
   return String(n).trim().replace(/\s/g, '').padStart(8, '0');
+}
+
+// MRet is recorded inconsistently across spreadsheet versions (Y, y, Yes, YES) —
+// treat any of those as a retainer flag rather than matching one exact string.
+function isRetainer(mret?: string): boolean {
+  const v = (mret || '').trim().toLowerCase();
+  return v === 'y' || v === 'yes';
 }
 
 async function fetchCompany(num: string | number): Promise<{ data?: Record<string, unknown>; error?: string; padded: string }> {
@@ -66,6 +72,8 @@ interface ClientResult {
   contactName?: string;
   email?: string;
   mret?: string;
+  periodStart?: string;
+  periodEnd?: string;
 }
 interface MismatchResult {
   name: string;
@@ -93,24 +101,44 @@ interface EmailQueueItem {
   error?: string;
 }
 
-// Placeholder copy — real copy to be provided separately. Only this function needs to
-// change to swap the template; the send/queue logic below never has to touch it.
+function formatPeriodDate(d?: string): string {
+  if (!d) return '';
+  const parsed = new Date(d);
+  return isNaN(parsed.getTime()) ? d : format(parsed, 'dd MMM yyyy');
+}
+
+// Two templates selected automatically by MRet status — retainer clients (Template 2)
+// have the deposit request line removed since they're already on a monthly retainer.
 function buildEmailBody(r: ClientResult): string {
   const firstName = r.contactName ? r.contactName.split(' ')[0] : r.name.split(' ')[0];
-  const dueLine = r.status === 'overdue'
-    ? `overdue by ${Math.abs(r.diffDays!)} day${Math.abs(r.diffDays!) === 1 ? '' : 's'}`
-    : `due on ${r.dueDate ? format(new Date(r.dueDate), 'dd MMM yyyy') : ''}`;
-  return `Dear ${firstName},
+  const periodStart = formatPeriodDate(r.periodStart);
+  const periodEnd = formatPeriodDate(r.periodEnd);
 
-This is to let you know that the annual accounts for ${r.name} (Company No. ${r.number}) are ${dueLine} with Companies House.
+  const depositItem = isRetainer(r.mret) ? '' : `
+  <li style="background-color:#ffff00; padding:6px;"><strong>If you are not on a monthly retainer, please pay an advance deposit of <span style="color:red;">£120</span></strong> (Bank name: AL Accounting Solutions Ltd, Sort: 600238, Account: 68132328, Reference: company name)</li>`;
 
-Please get in touch as soon as possible so we can begin preparing your accounts in good time.
+  return `<p>Dear ${firstName},</p>
 
-If you have any questions, don't hesitate to get in touch.
+<p><strong>Company Name:</strong> ${r.name}<br>
+<strong>Accounting period from:</strong> ${periodStart} to ${periodEnd}</p>
 
-Kind regards,
-AL Accounting Solutions
-admin@alaccountingsolutions.com`;
+<p>Please note that your company's accounts and corporation tax return are due. We require the following documents:</p>
+
+<ol>
+  <li>Company bank transactions for the period (please download transactions to Excel/CSV and PDF and send to this email)</li>
+  <li>Sales or income schedule</li>
+  <li>Purchases or expenses schedule for the period</li>
+  <li>Payroll information for the period</li>
+  <li>Any other documents that will help us complete the accounts</li>${depositItem}
+</ol>
+
+<p>We look forward to hearing from you soon!</p>
+
+<p>Kind Regards,<br>
+<em>Florence D Mandevane</em><br>
+AL Accounting Solutions<br>
+<a href="mailto:admin@alaccountingsolutions.com">admin@alaccountingsolutions.com</a><br>
+<a href="https://www.alaccountingsolutions.com">www.alaccountingsolutions.com</a></p>`;
 }
 
 export default function Tracker() {
@@ -387,8 +415,11 @@ export default function Tracker() {
           if (i < rows.length - 1 && !cancelledRef.current) await delay(600);
           continue;
         }
-        const accountsData = (result.data as Record<string, Record<string, string>>)?.accounts;
-        const dueStr = accountsData?.next_due;
+        const accountsData = (result.data as Record<string, Record<string, unknown>>)?.accounts;
+        const dueStr = accountsData?.next_due as string | undefined;
+        const nextAccounts = accountsData?.next_accounts as Record<string, string> | undefined;
+        const periodStart = nextAccounts?.period_start_on;
+        const periodEnd = nextAccounts?.period_end_on;
         if (!dueStr) {
           results.push({ name: clientName, number: result.padded, dueDate: null, dueObj: null, diffDays: null, status: 'error', error: 'No accounts due date returned', contactName, email, mret });
         } else {
@@ -396,7 +427,7 @@ export default function Tracker() {
           dueObj.setHours(0, 0, 0, 0);
           const diffDays = Math.round((dueObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
           const status: ResultStatus = dueObj < today ? 'overdue' : diffDays <= AMBER_THRESHOLD_DAYS ? 'soon' : 'clear';
-          results.push({ name: clientName, number: result.padded, dueDate: dueStr, dueObj, diffDays, status, contactName, email, mret });
+          results.push({ name: clientName, number: result.padded, dueDate: dueStr, dueObj, diffDays, status, contactName, email, mret, periodStart, periodEnd });
         }
       }
       if (i < rows.length - 1 && !cancelledRef.current) await delay(600);
@@ -492,7 +523,7 @@ export default function Tracker() {
       r.name, r.number, r.dueDate || '',
       r.diffDays != null ? String(r.diffDays) : '',
       r.status,
-      r.mret?.toLowerCase() === 'yes' ? 'Yes' : '',
+      isRetainer(r.mret) ? 'Yes' : '',
       r.error || ''
     ]));
     if (mismatches.length > 0) {
@@ -510,25 +541,18 @@ export default function Tracker() {
   };
 
   const openEmailModal = (r: ClientResult) => {
-    const dueSuffix = r.status === 'overdue' ? 'Overdue' : 'Due';
-    const daysAbs = Math.abs(r.diffDays!);
     setModalRow(r);
     setDraftTo(r.email || '');
-    setDraftSubject(`Accounts Filing - ${r.name} - ${dueSuffix} - ${daysAbs} days`);
+    setDraftSubject(`${r.name} Accounts documents required (ACT)`);
     setDraftBody(buildEmailBody(r));
     setEmailModalOpen(true);
   };
 
   const handleSendEmail = () => {
     if (!modalRow) return;
-    // Convert plain text to HTML so Make.com preserves line breaks and spacing —
-    // plain text renders as an unstyled wall of text even with the module set to HTML.
+    // draftBody is already HTML (from buildEmailBody) — just wrap it for consistent font styling.
     const bodyHtml = '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#333">'
       + draftBody
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/\n/g, '<br>')
       + '</div>';
     enqueueEmail({
       id: `${modalRow.number}-${Date.now()}`,
@@ -956,14 +980,14 @@ export default function Tracker() {
                             {r.status === 'error' && <Badge variant="secondary" className="bg-slate-100 text-slate-500">Error</Badge>}
                           </TableCell>
                           <TableCell className="text-center text-sm text-slate-600">
-                            {r.mret?.toLowerCase() === 'yes' ? 'Yes' : ''}
+                            {isRetainer(r.mret) ? (
+                              <Badge variant="outline" className="bg-teal-50 border-teal-200 text-teal-700 text-xs font-medium">
+                                Monthly Retainer
+                              </Badge>
+                            ) : ''}
                           </TableCell>
                           <TableCell className="text-right print:hidden">
-                            {r.mret?.toLowerCase() === 'yes' ? (
-                              <Badge variant="outline" className="bg-purple-50 border-purple-200 text-purple-700 text-xs">
-                                File directly
-                              </Badge>
-                            ) : (r.status === 'overdue' || r.status === 'soon') ? (
+                            {(isRetainer(r.mret) || r.status === 'overdue' || r.status === 'soon') ? (
                               (() => {
                                 const queueItem = emailQueue.find(q => q.number === r.number);
                                 if (queueItem?.status === 'queued' || queueItem?.status === 'sending') {
@@ -998,7 +1022,16 @@ export default function Tracker() {
                                     </div>
                                   );
                                 }
-                                return (
+                                return isRetainer(r.mret) ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs gap-1 border-slate-300 text-slate-500 hover:bg-slate-50"
+                                    onClick={() => openEmailModal(r)}
+                                  >
+                                    Docs only
+                                  </Button>
+                                ) : (
                                   <Button
                                     size="sm"
                                     variant="outline"
@@ -1127,7 +1160,7 @@ export default function Tracker() {
               <Textarea
                 value={draftBody}
                 onChange={e => setDraftBody(e.target.value)}
-                rows={12}
+                rows={18}
                 className="text-sm font-mono resize-none leading-relaxed"
               />
             </div>
