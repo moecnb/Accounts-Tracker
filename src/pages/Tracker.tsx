@@ -184,16 +184,10 @@ export default function Tracker() {
   const [draftTo, setDraftTo] = useState('');
   const [draftSubject, setDraftSubject] = useState('');
   const [draftBody, setDraftBody] = useState('');
-  const bodyEditableRef = useRef<HTMLDivElement>(null);
-
-  // The contentEditable div owns its own DOM after this — we only push draftBody
-  // into it once per row (on open), not on every keystroke, or the cursor would jump.
-  React.useLayoutEffect(() => {
-    if (emailModalOpen && bodyEditableRef.current) {
-      bodyEditableRef.current.innerHTML = draftBody;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [emailModalOpen, modalRow]);
+  // Frozen snapshot used only to seed the contentEditable div's initial HTML at mount.
+  // draftBody keeps changing as the user types; this doesn't, so React never re-applies
+  // dangerouslySetInnerHTML mid-edit (which would reset the cursor to the start).
+  const [draftBodyTemplate, setDraftBodyTemplate] = useState('');
 
   const updateEmailQueue = (updater: (prev: EmailQueueItem[]) => EmailQueueItem[]) => {
     const next = updater(emailQueueRef.current);
@@ -550,10 +544,12 @@ export default function Tracker() {
   };
 
   const openEmailModal = (r: ClientResult) => {
+    const body = buildEmailBody(r);
     setModalRow(r);
     setDraftTo(r.email || '');
     setDraftSubject(`${r.name} Accounts documents required (ACT)`);
-    setDraftBody(buildEmailBody(r));
+    setDraftBody(body);
+    setDraftBodyTemplate(body);
     setEmailModalOpen(true);
   };
 
@@ -1168,11 +1164,12 @@ export default function Tracker() {
               <Label className="text-sm font-medium text-slate-700">Body</Label>
               <p className="text-xs text-slate-500">Formatted as it will appear in the recipient's inbox — click in to edit.</p>
               <div
-                ref={bodyEditableRef}
+                key={modalRow ? modalRow.number : 'empty'}
                 contentEditable
                 suppressContentEditableWarning
+                dangerouslySetInnerHTML={{ __html: draftBodyTemplate }}
                 onInput={e => setDraftBody(e.currentTarget.innerHTML)}
-                className="text-sm border border-slate-200 rounded-md p-4 bg-white max-h-96 overflow-y-auto focus:outline-none focus:ring-2 focus:ring-teal-500/40"
+                className="text-sm border border-slate-200 rounded-md p-4 bg-white min-h-[200px] max-h-96 overflow-y-auto focus:outline-none focus:ring-2 focus:ring-teal-500/40"
               />
             </div>
           </div>
