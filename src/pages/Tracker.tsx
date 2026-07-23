@@ -117,7 +117,7 @@ function buildEmailBody(r: ClientResult): string {
   const periodEnd = formatPeriodDate(r.periodEnd);
 
   const depositLine = isRetainer(r.mret) ? '' : `
-💷 If you are not on a monthly retainer, please pay an advance deposit of £120 (Bank: AL Accounting Solutions Ltd, Sort code: 60-02-38, Account: 68132328, Reference: your company name)`;
+💷 Please pay an advance deposit of £120 (Bank: AL Accounting Solutions Ltd, Sort code: 60-02-38, Account: 68132328, Reference: your company name)`;
 
   return `Dear ${firstName},
 
@@ -553,11 +553,15 @@ export default function Tracker() {
     if (!modalRow) return;
     // Convert the plain-text draft to HTML so Make.com preserves line breaks and spacing —
     // plain text renders as an unstyled wall of text even with the module set to HTML.
+    // £120 is bolded only in this final HTML output, not in the editable draft, so the
+    // Textarea stays plain and reliably editable — this only re-bolds if "£120" still
+    // appears verbatim, so a reworded/changed amount won't come through bold.
     const bodyHtml = '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#333">'
       + draftBody
           .replace(/&/g, '&amp;')
           .replace(/</g, '&lt;')
           .replace(/>/g, '&gt;')
+          .replace(/£120/g, '<strong>£120</strong>')
           .replace(/\n/g, '<br>')
       + '</div>';
     enqueueEmail({
