@@ -545,9 +545,11 @@ export default function Tracker() {
       isRetainer(r.mret) ? 'Yes' : '',
       r.error || ''
     ]));
-    if (mismatches.length > 0) {
-      rows.push([]);
-      rows.push(['--- Companies House Mismatches ---', '', '', '', '', '', '', '']);
+    rows.push([]);
+    rows.push([`--- Companies House Mismatches (${mismatches.length}) ---`, '', '', '', '', '', '', '']);
+    if (mismatches.length === 0) {
+      rows.push(['None in this run', '', '', '', '', '', '', '']);
+    } else {
       rows.push(['Client name', 'Company number', 'Our system status', 'Companies House status', 'Action', '', '', '']);
       mismatches.forEach(m => rows.push([m.name, m.number, m.ourStatus, m.chStatus, 'Review required', '', '', '']));
     }
@@ -1085,30 +1087,32 @@ export default function Tracker() {
               </div>
             </Card>
 
-            {mismatches.length > 0 && (
-              <div className="border border-orange-200 rounded-lg bg-orange-50/40">
-                <button
-                  className="w-full flex items-center justify-between px-5 py-4 text-left print:hidden"
-                  onClick={() => setMismatchOpen(o => !o)}
-                >
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
-                    <span className="font-semibold text-orange-900">
-                      Companies House Mismatches ({mismatches.length})
-                    </span>
-                  </div>
-                  <ChevronDown className={`h-4 w-4 text-orange-600 transition-transform ${mismatchOpen ? 'rotate-180' : ''}`} />
-                </button>
-                <div className="hidden print:block px-5 pt-4">
+            <div className="border border-orange-200 rounded-lg bg-orange-50/40">
+              <button
+                className="w-full flex items-center justify-between px-5 py-4 text-left print:hidden"
+                onClick={() => setMismatchOpen(o => !o)}
+              >
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
                   <span className="font-semibold text-orange-900">
                     Companies House Mismatches ({mismatches.length})
                   </span>
                 </div>
+                <ChevronDown className={`h-4 w-4 text-orange-600 transition-transform ${mismatchOpen ? 'rotate-180' : ''}`} />
+              </button>
+              <div className="hidden print:block px-5 pt-4">
+                <span className="font-semibold text-orange-900">
+                  Companies House Mismatches ({mismatches.length})
+                </span>
+              </div>
 
-                <div className={`px-5 pb-5 space-y-3 ${mismatchOpen ? '' : 'hidden print:block'}`}>
-                    <p className="text-sm text-orange-800 border-t border-orange-200 pt-4">
-                      This report shows discrepancies between our internal records and Companies House. The following clients are marked as active in our system but are showing a different status on Companies House. Please review and update internal records accordingly.
-                    </p>
+              <div className={`px-5 pb-5 space-y-3 ${mismatchOpen ? '' : 'hidden print:block'}`}>
+                  <p className="text-sm text-orange-800 border-t border-orange-200 pt-4">
+                    This report shows discrepancies between our internal records and Companies House. The following clients are marked as active in our system but are showing a different status on Companies House. Please review and update internal records accordingly.
+                  </p>
+                  {mismatches.length === 0 ? (
+                    <p className="text-sm text-orange-700 italic">None in this run — every Active client checked out as active with Companies House.</p>
+                  ) : (
                     <div className="overflow-x-auto rounded border border-orange-200 bg-white">
                       <Table>
                         <TableHeader>
@@ -1137,9 +1141,9 @@ export default function Tracker() {
                         </TableBody>
                       </Table>
                     </div>
-                </div>
+                  )}
               </div>
-            )}
+            </div>
           </div>
         )}
       </main>
