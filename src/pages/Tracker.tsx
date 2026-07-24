@@ -598,31 +598,37 @@ export default function Tracker() {
 
   const statusOrder: Record<ResultStatus, number> = { overdue: 0, soon: 1, clear: 2, error: 3 };
 
-  const filteredResults = useMemo(() => {
+  // The made-up-to cutoff is the one filter that defines "the current view" — search and
+  // the status tabs are transient quick-filters on top of it. Stats and the table both
+  // derive from this same filtered set so the numbers always reconcile.
+  const dateFilteredResults = useMemo(() => {
     const cutoff = madeUpToDate ? new Date(madeUpToDate) : null;
     if (cutoff) cutoff.setHours(23, 59, 59);
 
-    return allResults
+    // Cumulative: any client whose made-up-to date is on or before the cutoff appears,
+    // however far back — nothing drops off just because time passes.
+    return allResults.filter(r => !(cutoff && r.madeUpToObj && r.madeUpToObj > cutoff));
+  }, [allResults, madeUpToDate]);
+
+  const filteredResults = useMemo(() => {
+    return dateFilteredResults
       .filter(r => {
         if (search && !r.name.toLowerCase().includes(search.toLowerCase()) && !r.number.includes(search)) return false;
         if (currentFilter !== 'all' && r.status !== currentFilter) return false;
-        // Cumulative: any client whose made-up-to date is on or before the cutoff appears,
-        // however far back — nothing drops off just because time passes.
-        if (cutoff && r.madeUpToObj && r.madeUpToObj > cutoff) return false;
         return true;
       })
       .sort((a, b) => statusOrder[a.status] - statusOrder[b.status] || (a.diffDays ?? 9999) - (b.diffDays ?? 9999));
-  }, [allResults, currentFilter, search, madeUpToDate]);
+  }, [dateFilteredResults, currentFilter, search]);
 
   const stats = useMemo(() => {
     let overdue = 0, soon = 0, clear = 0;
-    allResults.forEach(r => {
+    dateFilteredResults.forEach(r => {
       if (r.status === 'overdue') overdue++;
-      if (r.status === 'soon') soon++;
-      if (r.status === 'clear') clear++;
+      else if (r.status === 'soon') soon++;
+      else if (r.status === 'clear') clear++;
     });
-    return { total: allResults.length, overdue, soon, clear };
-  }, [allResults]);
+    return { total: overdue + soon + clear, overdue, soon, clear };
+  }, [dateFilteredResults]);
 
   return (
     <div className="min-h-screen bg-slate-50 pb-20" data-print-date={format(new Date(), 'dd MMM yyyy')}>
