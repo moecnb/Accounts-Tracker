@@ -973,7 +973,7 @@ export default function Tracker() {
               </div>
 
               <div className="overflow-x-auto">
-                <Table>
+                <Table className="main-results-table">
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[280px]">Client name</TableHead>
@@ -1114,7 +1114,7 @@ export default function Tracker() {
                     <p className="text-sm text-orange-700 italic">None in this run — every Active client checked out as active with Companies House.</p>
                   ) : (
                     <div className="overflow-x-auto rounded border border-orange-200 bg-white">
-                      <Table>
+                      <Table className="mismatches-table">
                         <TableHeader>
                           <TableRow className="hover:bg-transparent bg-orange-50">
                             <TableHead className="w-[280px]">Client name</TableHead>
