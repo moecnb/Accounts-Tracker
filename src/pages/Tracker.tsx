@@ -369,6 +369,9 @@ export default function Tracker() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    const madeUpToCutoff = madeUpToDate ? new Date(madeUpToDate) : null;
+    if (madeUpToCutoff) madeUpToCutoff.setHours(23, 59, 59);
+
     const rows = rawData.slice(1).filter(r => r[nIdx] && String(r[nIdx]).trim());
     const results: ClientResult[] = [];
     const mismatchResults: MismatchResult[] = [];
@@ -416,12 +419,6 @@ export default function Tracker() {
         results.push({ name: clientName, number: result.padded, dueDate: null, dueObj: null, madeUpTo: null, madeUpToObj: null, diffDays: null, status: 'error', error: result.error, contactName, email, mret });
       } else {
         const companyStatus = (result.data as Record<string, string>)?.company_status;
-        if (companyStatus !== 'active') {
-          notActiveCH++;
-          mismatchResults.push({ name: clientName, number: result.padded, ourStatus: ourStatus || 'Active', chStatus: companyStatus || 'unknown' });
-          if (i < rows.length - 1 && !cancelledRef.current) await delay(600);
-          continue;
-        }
         const accountsData = (result.data as Record<string, Record<string, unknown>>)?.accounts;
         const dueStr = accountsData?.next_due as string | undefined;
         const madeUpToStr = accountsData?.next_made_up_to as string | undefined;
@@ -429,6 +426,19 @@ export default function Tracker() {
         const nextAccounts = accountsData?.next_accounts as Record<string, string> | undefined;
         const periodStart = nextAccounts?.period_start_on;
         const periodEnd = nextAccounts?.period_end_on;
+
+        if (companyStatus !== 'active') {
+          // Still respect the made-up-to filter — only surface dissolved/inactive
+          // companies whose outstanding period is actually in range. If we can't
+          // tell (no made-up-to date returned), show it rather than hide it.
+          const inRange = !madeUpToObj || !madeUpToCutoff || madeUpToObj <= madeUpToCutoff;
+          if (inRange) {
+            notActiveCH++;
+            mismatchResults.push({ name: clientName, number: result.padded, ourStatus: ourStatus || 'Active', chStatus: companyStatus || 'unknown' });
+          }
+          if (i < rows.length - 1 && !cancelledRef.current) await delay(600);
+          continue;
+        }
         if (!dueStr) {
           results.push({ name: clientName, number: result.padded, dueDate: null, dueObj: null, madeUpTo: madeUpToStr || null, madeUpToObj, diffDays: null, status: 'error', error: 'No accounts due date returned', contactName, email, mret });
         } else {
@@ -599,7 +609,7 @@ export default function Tracker() {
         if (cutoff && r.madeUpToObj && r.madeUpToObj > cutoff) return false;
         return true;
       })
-      .sort((a, b) => (statusOrder[a.status] || 3) - (statusOrder[b.status] || 3) || (a.diffDays ?? 9999) - (b.diffDays ?? 9999));
+      .sort((a, b) => statusOrder[a.status] - statusOrder[b.status] || (a.diffDays ?? 9999) - (b.diffDays ?? 9999));
   }, [allResults, currentFilter, search, madeUpToDate]);
 
   const stats = useMemo(() => {
@@ -1012,62 +1022,60 @@ export default function Tracker() {
                             ) : ''}
                           </TableCell>
                           <TableCell className="text-right print:hidden">
-                            {(isRetainer(r.mret) || r.status === 'overdue' || r.status === 'soon') ? (
-                              (() => {
-                                const queueItem = emailQueue.find(q => q.number === r.number);
-                                if (queueItem?.status === 'queued' || queueItem?.status === 'sending') {
-                                  return (
-                                    <Badge variant="outline" className="h-7 px-2.5 text-xs gap-1 bg-blue-50 border-blue-200 text-blue-700 font-normal">
-                                      <Loader2 className="h-3 w-3 animate-spin" />
-                                      {queueItem.status === 'sending' ? 'Sending…' : 'Queued'}
-                                    </Badge>
-                                  );
-                                }
-                                if (queueItem?.status === 'sent') {
-                                  return (
-                                    <Badge variant="outline" className="h-7 px-2.5 text-xs gap-1 bg-green-50 border-green-200 text-green-700 font-normal">
-                                      <CheckCircle2 className="h-3 w-3" /> Sent
-                                    </Badge>
-                                  );
-                                }
-                                if (queueItem?.status === 'failed') {
-                                  return (
-                                    <div className="flex items-center justify-end gap-1.5">
-                                      <Badge variant="destructive" className="h-7 px-2.5 text-xs gap-1 bg-red-100 text-red-800 hover:bg-red-100 font-normal" title={queueItem.error}>
-                                        <XCircle className="h-3 w-3" /> Failed
-                                      </Badge>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-7 text-xs gap-1 border-red-300 text-red-700 hover:bg-red-50"
-                                        onClick={() => retryEmail(queueItem.id)}
-                                      >
-                                        <RefreshCw className="h-3 w-3" /> Retry
-                                      </Button>
-                                    </div>
-                                  );
-                                }
-                                return isRetainer(r.mret) ? (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 text-xs gap-1 border-slate-300 text-slate-500 hover:bg-slate-50"
-                                    onClick={() => openEmailModal(r)}
-                                  >
-                                    Docs only
-                                  </Button>
-                                ) : (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 text-xs gap-1 border-slate-300 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700"
-                                    onClick={() => openEmailModal(r)}
-                                  >
-                                    <Mail className="h-3 w-3" /> Email
-                                  </Button>
+                            {(() => {
+                              const queueItem = emailQueue.find(q => q.number === r.number);
+                              if (queueItem?.status === 'queued' || queueItem?.status === 'sending') {
+                                return (
+                                  <Badge variant="outline" className="h-7 px-2.5 text-xs gap-1 bg-blue-50 border-blue-200 text-blue-700 font-normal">
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    {queueItem.status === 'sending' ? 'Sending…' : 'Queued'}
+                                  </Badge>
                                 );
-                              })()
-                            ) : null}
+                              }
+                              if (queueItem?.status === 'sent') {
+                                return (
+                                  <Badge variant="outline" className="h-7 px-2.5 text-xs gap-1 bg-green-50 border-green-200 text-green-700 font-normal">
+                                    <CheckCircle2 className="h-3 w-3" /> Sent
+                                  </Badge>
+                                );
+                              }
+                              if (queueItem?.status === 'failed') {
+                                return (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <Badge variant="destructive" className="h-7 px-2.5 text-xs gap-1 bg-red-100 text-red-800 hover:bg-red-100 font-normal" title={queueItem.error}>
+                                      <XCircle className="h-3 w-3" /> Failed
+                                    </Badge>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 text-xs gap-1 border-red-300 text-red-700 hover:bg-red-50"
+                                      onClick={() => retryEmail(queueItem.id)}
+                                    >
+                                      <RefreshCw className="h-3 w-3" /> Retry
+                                    </Button>
+                                  </div>
+                                );
+                              }
+                              return isRetainer(r.mret) ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs gap-1 border-slate-300 text-slate-500 hover:bg-slate-50"
+                                  onClick={() => openEmailModal(r)}
+                                >
+                                  Docs only
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs gap-1 border-slate-300 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700"
+                                  onClick={() => openEmailModal(r)}
+                                >
+                                  <Mail className="h-3 w-3" /> Email
+                                </Button>
+                              );
+                            })()}
                           </TableCell>
                         </TableRow>
                       ))
