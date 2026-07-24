@@ -986,7 +986,7 @@ export default function Tracker() {
                       <TableHead>Company number</TableHead>
                       <TableHead>Made-up-to date</TableHead>
                       <TableHead>Due date</TableHead>
-                      <TableHead>Days</TableHead>
+                      <TableHead className="print:hidden">Days</TableHead>
                       <TableHead className="text-right">Status</TableHead>
                       <TableHead className="text-center">MRet</TableHead>
                       <TableHead className="text-right w-[140px] print:hidden">Actions</TableHead>
@@ -1010,24 +1010,28 @@ export default function Tracker() {
                           <TableCell className="text-slate-600">
                             {r.dueDate ? format(new Date(r.dueDate), 'dd MMM yyyy') : '-'}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="print:hidden">
                             {r.status === 'overdue' && <span className="font-bold text-red-600">{Math.abs(r.diffDays!)} days ago</span>}
                             {r.status === 'soon' && <span className="font-bold text-amber-600">{r.diffDays} days</span>}
                             {r.status === 'clear' && <span className="text-slate-500">{r.diffDays} days</span>}
                             {r.status === 'error' && <span className="text-xs text-red-500 leading-tight">{r.error || 'Unknown error'}</span>}
                           </TableCell>
-                          <TableCell className="text-right">
-                            {r.status === 'overdue' && <Badge variant="destructive" className="bg-red-100 text-red-800 hover:bg-red-100">Overdue</Badge>}
-                            {r.status === 'soon' && <Badge variant="outline" className="bg-amber-100 border-amber-200 text-amber-800">Due soon</Badge>}
-                            {r.status === 'clear' && <Badge variant="outline" className="bg-green-100 border-green-200 text-green-800">Clear</Badge>}
-                            {r.status === 'error' && <Badge variant="secondary" className="bg-slate-100 text-slate-500">Error</Badge>}
+                          <TableCell className="text-right print:whitespace-nowrap">
+                            {r.status === 'overdue' && <Badge variant="destructive" className="bg-red-100 text-red-800 hover:bg-red-100 print:hidden">Overdue</Badge>}
+                            {r.status === 'soon' && <Badge variant="outline" className="bg-amber-100 border-amber-200 text-amber-800 print:hidden">Due soon</Badge>}
+                            {r.status === 'clear' && <Badge variant="outline" className="bg-green-100 border-green-200 text-green-800 print:hidden">Clear</Badge>}
+                            {r.status === 'error' && <Badge variant="secondary" className="bg-slate-100 text-slate-500 print:hidden">Error</Badge>}
+                            <span className="hidden print:inline">
+                              {r.status === 'overdue' ? 'Overdue' : r.status === 'soon' ? 'Due soon' : r.status === 'clear' ? 'Clear' : 'Error'}
+                            </span>
                           </TableCell>
                           <TableCell className="text-center text-sm text-slate-600">
-                            {isRetainer(r.mret) ? (
-                              <Badge variant="outline" className="bg-teal-50 border-teal-200 text-teal-700 text-xs font-medium">
+                            {isRetainer(r.mret) && (
+                              <Badge variant="outline" className="bg-teal-50 border-teal-200 text-teal-700 text-xs font-medium print:hidden">
                                 Monthly Retainer
                               </Badge>
-                            ) : ''}
+                            )}
+                            <span className="hidden print:inline">{isRetainer(r.mret) ? 'Y' : ''}</span>
                           </TableCell>
                           <TableCell className="text-right print:hidden">
                             {(() => {
