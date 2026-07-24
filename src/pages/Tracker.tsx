@@ -66,6 +66,8 @@ interface ClientResult {
   number: string;
   dueDate: string | null;
   dueObj: Date | null;
+  madeUpTo: string | null;
+  madeUpToObj: Date | null;
   diffDays: number | null;
   status: ResultStatus;
   error?: string;
@@ -162,9 +164,11 @@ export default function Tracker() {
 
   const [copied, setCopied] = useState(false);
 
-  const defaultCheckUntil = new Date();
-  defaultCheckUntil.setDate(defaultCheckUntil.getDate() + AMBER_THRESHOLD_DAYS);
-  const [checkUntil, setCheckUntil] = useState<string>(defaultCheckUntil.toISOString().slice(0, 10));
+  // Defaults to the end of the current month — this is run at the start of each
+  // month to catch every client whose accounts are outstanding up to that month's end.
+  const now = new Date();
+  const defaultMadeUpTo = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const [madeUpToDate, setMadeUpToDate] = useState<string>(defaultMadeUpTo.toISOString().slice(0, 10));
 
   const [filename, setFilename] = useState('');
   const [nameColIdx, setNameColIdx] = useState<string>('');
@@ -409,7 +413,7 @@ export default function Tracker() {
       const result = await fetchCompany(String(rawNum));
 
       if (result.error) {
-        results.push({ name: clientName, number: result.padded, dueDate: null, dueObj: null, diffDays: null, status: 'error', error: result.error, contactName, email, mret });
+        results.push({ name: clientName, number: result.padded, dueDate: null, dueObj: null, madeUpTo: null, madeUpToObj: null, diffDays: null, status: 'error', error: result.error, contactName, email, mret });
       } else {
         const companyStatus = (result.data as Record<string, string>)?.company_status;
         if (companyStatus !== 'active') {
@@ -420,17 +424,19 @@ export default function Tracker() {
         }
         const accountsData = (result.data as Record<string, Record<string, unknown>>)?.accounts;
         const dueStr = accountsData?.next_due as string | undefined;
+        const madeUpToStr = accountsData?.next_made_up_to as string | undefined;
+        const madeUpToObj = madeUpToStr ? new Date(madeUpToStr) : null;
         const nextAccounts = accountsData?.next_accounts as Record<string, string> | undefined;
         const periodStart = nextAccounts?.period_start_on;
         const periodEnd = nextAccounts?.period_end_on;
         if (!dueStr) {
-          results.push({ name: clientName, number: result.padded, dueDate: null, dueObj: null, diffDays: null, status: 'error', error: 'No accounts due date returned', contactName, email, mret });
+          results.push({ name: clientName, number: result.padded, dueDate: null, dueObj: null, madeUpTo: madeUpToStr || null, madeUpToObj, diffDays: null, status: 'error', error: 'No accounts due date returned', contactName, email, mret });
         } else {
           const dueObj = new Date(dueStr);
           dueObj.setHours(0, 0, 0, 0);
           const diffDays = Math.round((dueObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
           const status: ResultStatus = dueObj < today ? 'overdue' : diffDays <= AMBER_THRESHOLD_DAYS ? 'soon' : 'clear';
-          results.push({ name: clientName, number: result.padded, dueDate: dueStr, dueObj, diffDays, status, contactName, email, mret, periodStart, periodEnd });
+          results.push({ name: clientName, number: result.padded, dueDate: dueStr, dueObj, madeUpTo: madeUpToStr || null, madeUpToObj, diffDays, status, contactName, email, mret, periodStart, periodEnd });
         }
       }
       if (i < rows.length - 1 && !cancelledRef.current) await delay(600);
@@ -521,9 +527,9 @@ export default function Tracker() {
   };
 
   const exportCSV = () => {
-    const rows: string[][] = [['Client name', 'Company number', 'Due date', 'Days', 'Status', 'MRet', 'Notes']];
+    const rows: string[][] = [['Client name', 'Company number', 'Made-up-to date', 'Due date', 'Days', 'Status', 'MRet', 'Notes']];
     filteredResults.forEach(r => rows.push([
-      r.name, r.number, r.dueDate || '',
+      r.name, r.number, r.madeUpTo || '', r.dueDate || '',
       r.diffDays != null ? String(r.diffDays) : '',
       r.status,
       isRetainer(r.mret) ? 'Yes' : '',
@@ -531,9 +537,9 @@ export default function Tracker() {
     ]));
     if (mismatches.length > 0) {
       rows.push([]);
-      rows.push(['--- Companies House Mismatches ---', '', '', '', '', '', '']);
-      rows.push(['Client name', 'Company number', 'Our system status', 'Companies House status', 'Action', '', '']);
-      mismatches.forEach(m => rows.push([m.name, m.number, m.ourStatus, m.chStatus, 'Review required', '', '']));
+      rows.push(['--- Companies House Mismatches ---', '', '', '', '', '', '', '']);
+      rows.push(['Client name', 'Company number', 'Our system status', 'Companies House status', 'Action', '', '', '']);
+      mismatches.forEach(m => rows.push([m.name, m.number, m.ourStatus, m.chStatus, 'Review required', '', '', '']));
     }
     const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -581,18 +587,20 @@ export default function Tracker() {
   const statusOrder: Record<ResultStatus, number> = { overdue: 0, soon: 1, clear: 2, error: 3 };
 
   const filteredResults = useMemo(() => {
-    const cutoff = checkUntil ? new Date(checkUntil) : null;
+    const cutoff = madeUpToDate ? new Date(madeUpToDate) : null;
     if (cutoff) cutoff.setHours(23, 59, 59);
 
     return allResults
       .filter(r => {
         if (search && !r.name.toLowerCase().includes(search.toLowerCase()) && !r.number.includes(search)) return false;
         if (currentFilter !== 'all' && r.status !== currentFilter) return false;
-        if (cutoff && r.dueObj && r.dueObj > cutoff && r.status !== 'overdue') return false;
+        // Cumulative: any client whose made-up-to date is on or before the cutoff appears,
+        // however far back — nothing drops off just because time passes.
+        if (cutoff && r.madeUpToObj && r.madeUpToObj > cutoff) return false;
         return true;
       })
       .sort((a, b) => (statusOrder[a.status] || 3) - (statusOrder[b.status] || 3) || (a.diffDays ?? 9999) - (b.diffDays ?? 9999));
-  }, [allResults, currentFilter, search, checkUntil]);
+  }, [allResults, currentFilter, search, madeUpToDate]);
 
   const stats = useMemo(() => {
     let overdue = 0, soon = 0, clear = 0;
@@ -667,15 +675,15 @@ export default function Tracker() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="check-until" className="text-slate-700">Check until date</Label>
+                  <Label htmlFor="made-up-to" className="text-slate-700">Made up to date</Label>
                   <Input
-                    id="check-until"
+                    id="made-up-to"
                     type="date"
-                    data-testid="check-until-input"
-                    value={checkUntil}
-                    onChange={e => setCheckUntil(e.target.value)}
+                    data-testid="made-up-to-input"
+                    value={madeUpToDate}
+                    onChange={e => setMadeUpToDate(e.target.value)}
                   />
-                  <p className="text-xs text-slate-500">Only accounts due before this date will be tracked.</p>
+                  <p className="text-xs text-slate-500">Show all clients with accounts made up to this date or earlier. Run this for the end of the month you are working on.</p>
                 </div>
               </CardContent>
             </Card>
@@ -850,9 +858,9 @@ export default function Tracker() {
               )}
             </div>
 
-            {checkUntil && (
+            {madeUpToDate && (
               <p className="text-lg font-bold text-slate-800">
-                Showing accounts due up to {format(new Date(checkUntil), 'dd MMM yyyy')}
+                Showing clients with accounts made up to {format(new Date(madeUpToDate), 'dd MMM yyyy')} or earlier
               </p>
             )}
 
@@ -958,6 +966,7 @@ export default function Tracker() {
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[280px]">Client name</TableHead>
                       <TableHead>Company number</TableHead>
+                      <TableHead>Made-up-to date</TableHead>
                       <TableHead>Due date</TableHead>
                       <TableHead>Days</TableHead>
                       <TableHead className="text-right">Status</TableHead>
@@ -968,7 +977,7 @@ export default function Tracker() {
                   <TableBody>
                     {filteredResults.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="h-32 text-center text-slate-500">
+                        <TableCell colSpan={8} className="h-32 text-center text-slate-500">
                           No results found matching criteria.
                         </TableCell>
                       </TableRow>
@@ -977,6 +986,9 @@ export default function Tracker() {
                         <TableRow key={i}>
                           <TableCell className="font-medium text-slate-900">{r.name}</TableCell>
                           <TableCell className="font-mono text-sm text-slate-600">{r.number}</TableCell>
+                          <TableCell className="text-slate-600">
+                            {r.madeUpTo ? format(new Date(r.madeUpTo), 'dd MMM yyyy') : '-'}
+                          </TableCell>
                           <TableCell className="text-slate-600">
                             {r.dueDate ? format(new Date(r.dueDate), 'dd MMM yyyy') : '-'}
                           </TableCell>
