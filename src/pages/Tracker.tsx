@@ -1060,7 +1060,7 @@ export default function Tracker() {
                       <TableHead className="print:hidden">Days</TableHead>
                       <TableHead className="text-right">Status</TableHead>
                       <TableHead className="text-center">MRet</TableHead>
-                      <TableHead className="text-center">WIP</TableHead>
+                      <TableHead className="text-center print:hidden">WIP</TableHead>
                       <TableHead className="text-right w-[190px] print:hidden">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -1105,14 +1105,11 @@ export default function Tracker() {
                             )}
                             <span className="hidden print:inline">{isRetainer(r.mret) ? 'Y' : ''}</span>
                           </TableCell>
-                          <TableCell className="text-center text-sm text-slate-600">
+                          <TableCell className="text-center text-sm text-slate-600 print:hidden">
                             {r.wip && (
-                              <>
-                                <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-700 text-xs font-medium print:hidden">
-                                  WIP · {daysSince(r.wipMarkedAt)}d
-                                </Badge>
-                                <span className="hidden print:inline">WIP ({daysSince(r.wipMarkedAt)}d)</span>
-                              </>
+                              <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-700 text-xs font-medium">
+                                WIP · {daysSince(r.wipMarkedAt)}d
+                              </Badge>
                             )}
                           </TableCell>
                           <TableCell className="text-right print:hidden">
