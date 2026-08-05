@@ -2,7 +2,7 @@ import React, { useState, useRef, useMemo } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { format } from 'date-fns';
-import { Download, UploadCloud, Search, Copy, Check, FileSpreadsheet, RefreshCw, XCircle, AlertCircle, AlertTriangle, CheckCircle2, Play, ArrowLeft, Mail, Send, Printer, ChevronDown, Loader2 } from 'lucide-react';
+import { Download, UploadCloud, Search, Copy, Check, FileSpreadsheet, RefreshCw, XCircle, AlertCircle, AlertTriangle, CheckCircle2, Play, ArrowLeft, Mail, Send, Printer, ChevronDown, Loader2, PackageCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Textarea } from '@/components/ui/textarea';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
+import { supabase } from '@/lib/supabase';
 
 // --- Configuration -----------------------------------------------------
 const HARDCODED_KEY = 'ed2030c6-2c5e-4a4c-90a7-597656156886';
@@ -76,6 +77,8 @@ interface ClientResult {
   mret?: string;
   periodStart?: string;
   periodEnd?: string;
+  wip?: boolean;
+  wipMarkedAt?: string | null;
 }
 interface MismatchResult {
   name: string;
@@ -107,6 +110,13 @@ function formatPeriodDate(d?: string): string {
   if (!d) return '';
   const parsed = new Date(d);
   return isNaN(parsed.getTime()) ? d : format(parsed, 'dd MMM yyyy');
+}
+
+function daysSince(dateStr?: string | null): number {
+  if (!dateStr) return 0;
+  const then = new Date(dateStr).getTime();
+  if (isNaN(then)) return 0;
+  return Math.max(0, Math.floor((Date.now() - then) / (1000 * 60 * 60 * 24)));
 }
 
 // Two templates selected automatically by MRet status — retainer clients have the
@@ -150,6 +160,9 @@ export default function Tracker() {
   const [allResults, setAllResults] = useState<ClientResult[]>([]);
   const [currentFilter, setCurrentFilter] = useState<'all' | 'overdue' | 'soon' | 'clear' | 'error'>('all');
   const [search, setSearch] = useState('');
+  // Print-only setting — default excludes WIP rows from the printout (they don't need
+  // chasing on paper); never affects the on-screen dashboard, which always shows them.
+  const [printIncludeWip, setPrintIncludeWip] = useState(false);
   const cancelledRef = useRef<boolean>(false);
   const [rawData, setRawData] = useState<string[][]>([]);
   const [isRunning, setIsRunning] = useState(false);
@@ -250,6 +263,29 @@ export default function Tracker() {
   const retryEmail = (id: string) => {
     updateEmailQueue(prev => prev.map(i => i.id === id ? { ...i, status: 'queued', error: undefined } : i));
     void processEmailQueue();
+  };
+
+  // Writes to Supabase immediately on toggle (no batching/save step), with an
+  // optimistic UI update that rolls back if the write fails.
+  const toggleWip = async (r: ClientResult) => {
+    const nextWip = !r.wip;
+    const nextMarkedAt = nextWip ? new Date().toISOString() : null;
+
+    setAllResults(prev => prev.map(x => x.number === r.number ? { ...x, wip: nextWip, wipMarkedAt: nextMarkedAt } : x));
+
+    const { error } = await supabase.from('wip_status').upsert({
+      company_number: r.number,
+      client_name: r.name,
+      is_wip: nextWip,
+      marked_at: nextMarkedAt,
+    });
+
+    if (error) {
+      setAllResults(prev => prev.map(x => x.number === r.number ? { ...x, wip: r.wip, wipMarkedAt: r.wipMarkedAt ?? null } : x));
+      toast.error(`Failed to update WIP status — ${r.name}`, { description: error.message });
+    } else {
+      toast.success(nextWip ? `${r.name} marked WIP` : `${r.name} unmarked as WIP`);
+    }
   };
 
   const emailQueueActive = emailQueue.filter(i => i.status === 'queued' || i.status === 'sending');
@@ -452,6 +488,29 @@ export default function Tracker() {
       if (i < rows.length - 1 && !cancelledRef.current) await delay(600);
     }
 
+    // WIP status is matched by company number, not row position, so it survives
+    // re-uploads and different staff re-sorting/editing the spreadsheet.
+    if (results.length > 0) {
+      try {
+        const { data: wipRows, error: wipError } = await supabase
+          .from('wip_status')
+          .select('company_number, is_wip, marked_at')
+          .in('company_number', results.map(r => r.number));
+        if (wipError) throw wipError;
+        const wipMap = new Map(
+          (wipRows || []).filter(w => w.is_wip).map(w => [w.company_number, w.marked_at as string | null])
+        );
+        results.forEach(r => {
+          if (wipMap.has(r.number)) {
+            r.wip = true;
+            r.wipMarkedAt = wipMap.get(r.number) ?? null;
+          }
+        });
+      } catch (err) {
+        toast.error('Could not load WIP status', { description: err instanceof Error ? err.message : 'Unknown error' });
+      }
+    }
+
     setAllResults(results);
     setMismatches(mismatchResults);
     setMismatchOpen(false);
@@ -623,6 +682,9 @@ export default function Tracker() {
   const stats = useMemo(() => {
     let overdue = 0, soon = 0, clear = 0;
     dateFilteredResults.forEach(r => {
+      // WIP clients already have their documents in hand — they don't need chasing,
+      // so they're excluded from the summary counts (they stay visible in the table).
+      if (r.wip) return;
       if (r.status === 'overdue') overdue++;
       else if (r.status === 'soon') soon++;
       else if (r.status === 'clear') clear++;
@@ -972,6 +1034,15 @@ export default function Tracker() {
                   <Button variant="outline" size="sm" onClick={exportCSV} data-testid="export-btn" className="h-9 shrink-0">
                     <Download className="h-4 w-4 mr-2" /> Export
                   </Button>
+                  <label className="flex items-center gap-1.5 text-xs text-slate-600 shrink-0 whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      checked={printIncludeWip}
+                      onChange={e => setPrintIncludeWip(e.target.checked)}
+                      className="h-3.5 w-3.5"
+                    />
+                    Include WIP in print
+                  </label>
                   <Button variant="outline" size="sm" onClick={() => window.print()} className="h-9 shrink-0">
                     <Printer className="h-4 w-4 mr-2" /> Print
                   </Button>
@@ -979,7 +1050,7 @@ export default function Tracker() {
               </div>
 
               <div className="overflow-x-auto">
-                <Table className="main-results-table">
+                <Table className={`main-results-table${printIncludeWip ? '' : ' exclude-wip-print'}`}>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[280px]">Client name</TableHead>
@@ -989,19 +1060,20 @@ export default function Tracker() {
                       <TableHead className="print:hidden">Days</TableHead>
                       <TableHead className="text-right">Status</TableHead>
                       <TableHead className="text-center">MRet</TableHead>
-                      <TableHead className="text-right w-[140px] print:hidden">Actions</TableHead>
+                      <TableHead className="text-center">WIP</TableHead>
+                      <TableHead className="text-right w-[190px] print:hidden">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredResults.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="h-32 text-center text-slate-500">
+                        <TableCell colSpan={9} className="h-32 text-center text-slate-500">
                           No results found matching criteria.
                         </TableCell>
                       </TableRow>
                     ) : (
                       filteredResults.map((r, i) => (
-                        <TableRow key={i}>
+                        <TableRow key={i} data-wip={r.wip ? 'true' : undefined} className={r.wip ? 'opacity-60' : ''}>
                           <TableCell className="font-medium text-slate-900">{r.name}</TableCell>
                           <TableCell className="font-mono text-sm text-slate-600">{r.number}</TableCell>
                           <TableCell className="text-slate-600">
@@ -1033,61 +1105,84 @@ export default function Tracker() {
                             )}
                             <span className="hidden print:inline">{isRetainer(r.mret) ? 'Y' : ''}</span>
                           </TableCell>
+                          <TableCell className="text-center text-sm text-slate-600">
+                            {r.wip && (
+                              <>
+                                <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-700 text-xs font-medium print:hidden">
+                                  WIP · {daysSince(r.wipMarkedAt)}d
+                                </Badge>
+                                <span className="hidden print:inline">WIP ({daysSince(r.wipMarkedAt)}d)</span>
+                              </>
+                            )}
+                          </TableCell>
                           <TableCell className="text-right print:hidden">
-                            {(() => {
-                              const queueItem = emailQueue.find(q => q.number === r.number);
-                              if (queueItem?.status === 'queued' || queueItem?.status === 'sending') {
-                                return (
-                                  <Badge variant="outline" className="h-7 px-2.5 text-xs gap-1 bg-blue-50 border-blue-200 text-blue-700 font-normal">
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                    {queueItem.status === 'sending' ? 'Sending…' : 'Queued'}
-                                  </Badge>
-                                );
-                              }
-                              if (queueItem?.status === 'sent') {
-                                return (
-                                  <Badge variant="outline" className="h-7 px-2.5 text-xs gap-1 bg-green-50 border-green-200 text-green-700 font-normal">
-                                    <CheckCircle2 className="h-3 w-3" /> Sent
-                                  </Badge>
-                                );
-                              }
-                              if (queueItem?.status === 'failed') {
-                                return (
-                                  <div className="flex items-center justify-end gap-1.5">
-                                    <Badge variant="destructive" className="h-7 px-2.5 text-xs gap-1 bg-red-100 text-red-800 hover:bg-red-100 font-normal" title={queueItem.error}>
-                                      <XCircle className="h-3 w-3" /> Failed
+                            <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                title={r.wip ? 'Unmark as WIP' : 'Mark as received / WIP'}
+                                className={r.wip
+                                  ? "h-7 text-xs gap-1 border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                                  : "h-7 text-xs gap-1 border-slate-300 text-slate-500 hover:bg-slate-50"}
+                                onClick={() => toggleWip(r)}
+                              >
+                                <PackageCheck className="h-3 w-3" /> {r.wip ? 'WIP' : 'Mark WIP'}
+                              </Button>
+                              {(() => {
+                                const queueItem = emailQueue.find(q => q.number === r.number);
+                                if (queueItem?.status === 'queued' || queueItem?.status === 'sending') {
+                                  return (
+                                    <Badge variant="outline" className="h-7 px-2.5 text-xs gap-1 bg-blue-50 border-blue-200 text-blue-700 font-normal">
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                      {queueItem.status === 'sending' ? 'Sending…' : 'Queued'}
                                     </Badge>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="h-7 text-xs gap-1 border-red-300 text-red-700 hover:bg-red-50"
-                                      onClick={() => retryEmail(queueItem.id)}
-                                    >
-                                      <RefreshCw className="h-3 w-3" /> Retry
-                                    </Button>
-                                  </div>
+                                  );
+                                }
+                                if (queueItem?.status === 'sent') {
+                                  return (
+                                    <Badge variant="outline" className="h-7 px-2.5 text-xs gap-1 bg-green-50 border-green-200 text-green-700 font-normal">
+                                      <CheckCircle2 className="h-3 w-3" /> Sent
+                                    </Badge>
+                                  );
+                                }
+                                if (queueItem?.status === 'failed') {
+                                  return (
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      <Badge variant="destructive" className="h-7 px-2.5 text-xs gap-1 bg-red-100 text-red-800 hover:bg-red-100 font-normal" title={queueItem.error}>
+                                        <XCircle className="h-3 w-3" /> Failed
+                                      </Badge>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-xs gap-1 border-red-300 text-red-700 hover:bg-red-50"
+                                        onClick={() => retryEmail(queueItem.id)}
+                                      >
+                                        <RefreshCw className="h-3 w-3" /> Retry
+                                      </Button>
+                                    </div>
+                                  );
+                                }
+                                return isRetainer(r.mret) ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs gap-1 border-slate-300 text-slate-500 hover:bg-slate-50"
+                                    onClick={() => openEmailModal(r)}
+                                  >
+                                    Docs only
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs gap-1 border-slate-300 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700"
+                                    onClick={() => openEmailModal(r)}
+                                  >
+                                    <Mail className="h-3 w-3" /> Email
+                                  </Button>
                                 );
-                              }
-                              return isRetainer(r.mret) ? (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-7 text-xs gap-1 border-slate-300 text-slate-500 hover:bg-slate-50"
-                                  onClick={() => openEmailModal(r)}
-                                >
-                                  Docs only
-                                </Button>
-                              ) : (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-7 text-xs gap-1 border-slate-300 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700"
-                                  onClick={() => openEmailModal(r)}
-                                >
-                                  <Mail className="h-3 w-3" /> Email
-                                </Button>
-                              );
-                            })()}
+                              })()}
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))

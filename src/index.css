@@ -140,21 +140,26 @@
   }
   th { font-weight: 600 !important; font-size: 7.5pt !important; border-bottom: 1px solid #999 !important; }
 
-  /* Fixed column widths for the main results table, sized for the 6 columns that are
+  /* Fixed column widths for the main results table, sized for the 7 columns that are
      actually visible in print (Days and Actions are print:hidden). Without fixed widths,
      narrow columns like Company number and the dates auto-size too narrow and wrap
      character-by-character, which was inflating the printout to ~16 pages. */
   .main-results-table { table-layout: fixed !important; }
-  .main-results-table th:nth-child(1), .main-results-table td:nth-child(1) { width: 34% !important; }
-  .main-results-table th:nth-child(2), .main-results-table td:nth-child(2) { width: 14% !important; }
-  .main-results-table th:nth-child(3), .main-results-table td:nth-child(3) { width: 15% !important; }
-  .main-results-table th:nth-child(4), .main-results-table td:nth-child(4) { width: 14% !important; }
-  .main-results-table th:nth-child(6), .main-results-table td:nth-child(6) { width: 15% !important; }
-  .main-results-table th:nth-child(7), .main-results-table td:nth-child(7) { width: 8% !important; }
+  .main-results-table th:nth-child(1), .main-results-table td:nth-child(1) { width: 28% !important; }
+  .main-results-table th:nth-child(2), .main-results-table td:nth-child(2) { width: 12% !important; }
+  .main-results-table th:nth-child(3), .main-results-table td:nth-child(3) { width: 13% !important; }
+  .main-results-table th:nth-child(4), .main-results-table td:nth-child(4) { width: 12% !important; }
+  .main-results-table th:nth-child(6), .main-results-table td:nth-child(6) { width: 14% !important; }
+  .main-results-table th:nth-child(7), .main-results-table td:nth-child(7) { width: 7% !important; }
+  .main-results-table th:nth-child(8), .main-results-table td:nth-child(8) { width: 14% !important; }
   /* Company number and both dates must sit on a single line — this is the main fix. */
   .main-results-table td:nth-child(2), .main-results-table td:nth-child(3), .main-results-table td:nth-child(4) {
     white-space: nowrap !important;
   }
+
+  /* Default print state excludes WIP rows (unchecked "Include WIP in print") — they
+     don't need chasing on paper. Never affects the on-screen dashboard. */
+  .main-results-table.exclude-wip-print tr[data-wip="true"] { display: none !important; }
 
   .text-red-600, .text-red-800 { color: #b91c1c !important; }
   .text-amber-600, .text-amber-800 { color: #b45309 !important; }
